@@ -1,4 +1,4 @@
-from realms import config, create_app, db, __version__, flask_cli as cli, cache
+from realms import config, create_app, db, __version__, cli, cache
 from realms.lib.util import random_string, in_virtualenv, green, yellow, red
 from subprocess import call, Popen
 from multiprocessing import cpu_count
@@ -9,6 +9,8 @@ import os
 import pip
 import time
 import subprocess
+
+config = config.conf
 
 # called to discover commands in modules
 app = create_app()

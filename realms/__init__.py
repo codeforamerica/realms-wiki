@@ -1,3 +1,4 @@
+import functools
 import sys
 
 # Set default encoding to UTF-8
@@ -75,7 +76,9 @@ class Application(Flask):
 
             # Click
             if hasattr(sources, 'commands'):
-                cli.add_command(sources.commands.cli, name=module_name)
+                if sources.commands.cli.name == 'cli':
+                    sources.commands.cli.name = module_name
+                cli.add_command(sources.commands.cli)
 
             # Hooks
             if hasattr(sources, 'hooks'):
@@ -164,7 +167,7 @@ def error_handler(e):
 
 def create_app(config=None):
     app = Application(__name__)
-    app.config.from_object('realms.config')
+    app.config.from_object('realms.config.conf')
     app.url_map.converters['regex'] = RegexConverter
     app.url_map.strict_slashes = False
 
@@ -287,9 +290,8 @@ class AppGroup(click.Group):
         kwargs.setdefault('cls', AppGroup)
         return click.Group.group(self, *args, **kwargs)
 
-flask_cli = AppGroup()
+cli = AppGroup()
 
+# Decorator to be used in modules instead of click.group
+cli_group = functools.partial(click.group, cls=AppGroup)
 
-@flask_cli.group()
-def cli():
-    pass

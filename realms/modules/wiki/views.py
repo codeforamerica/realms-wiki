@@ -1,5 +1,6 @@
 import itertools
 import sys
+from datetime import datetime
 from flask import abort, g, render_template, request, redirect
 from flask import send_from_directory, Blueprint, flash, url_for, current_app
 from flask.ext.login import login_required, current_user
@@ -29,7 +30,7 @@ def compare(name, fsha, dots, lsha):
     if current_app.config.get('PRIVATE_WIKI') and current_user.is_anonymous():
         return current_app.login_manager.unauthorized()
 
-    diff = g.current_wiki.compare(name, fsha, lsha)
+    diff = g.current_wiki.get_page(name, sha=lsha).compare(fsha)
     return render_template('wiki/compare.html',
                            name=name, diff=diff, old=fsha, new=lsha)
 
@@ -48,11 +49,10 @@ def revert():
         return dict(error=True, message="Page is locked"), 403
 
     try:
-        sha = g.current_wiki.revert_page(cname,
-                                         commit,
-                                         message=message,
-                                         username=current_user.username,
-                                         email=current_user.email)
+        sha = g.current_wiki.get_page(cname).revert(commit,
+                                                    message=message,
+                                                    username=current_user.username,
+                                                    email=current_user.email)
     except PageNotFound as e:
         return dict(error=True, message=e.message), 404
 
@@ -66,11 +66,37 @@ def revert():
 def history(name):
     if current_app.config.get('PRIVATE_WIKI') and current_user.is_anonymous():
         return current_app.login_manager.unauthorized()
+    return render_template('wiki/history.html', name=name)
 
-    hist = g.current_wiki.get_history(name)
-    for item in hist:
+
+@blueprint.route("/_history_data/<path:name>")
+def history_data(name):
+    """Ajax provider for paginated history data."""
+    if current_app.config.get('PRIVATE_WIKI') and current_user.is_anonymous():
+        return current_app.login_manager.unauthorized()
+    draw = int(request.args.get('draw', 0))
+    start = int(request.args.get('start', 0))
+    length = int(request.args.get('length', 10))
+    page = g.current_wiki.get_page(name)
+    items = list(itertools.islice(page.history, start, start + length))
+    for item in items:
         item['gravatar'] = gravatar_url(item['author_email'])
-    return render_template('wiki/history.html', name=name, history=hist)
+        item['DT_RowId'] = item['sha']
+        date = datetime.fromtimestamp(item['time'])
+        item['date'] = date.strftime(current_app.config.get('DATETIME_FORMAT', '%b %d, %Y %I:%M %p'))
+        item['link'] = url_for('.commit', name=name, sha=item['sha'])
+    total_records, hist_complete = page.history_cache
+    if not hist_complete:
+        # Force datatables to fetch more data when it gets to the end
+        total_records += 1
+    return {
+        'draw': draw,
+        'recordsTotal': total_records,
+        'recordsFiltered': total_records,
+        'data': items,
+        'fully_loaded': hist_complete
+    }
+
 
 
 @blueprint.route("/_edit/<path:name>")
@@ -86,10 +112,11 @@ def edit(name):
     g.assets['js'].append('editor.js')
     return render_template('wiki/edit.html',
                            name=cname,
-                           content=page.get('data'),
-                           info=page.get('info'),
-                           sha=page.get('sha'),
-                           partials=page.get('partials'))
+                           content=page.data,
+                           # TODO: Remove this? See #148
+                           info=next(page.history),
+                           sha=page.sha,
+                           partials=page.partials)
 
 
 @blueprint.route("/_create/", defaults={'name': None})
@@ -116,7 +143,6 @@ def _get_subdir(path, depth):
 
 def _tree_index(items, path=""):
     depth = len(path.split("/"))
-    items = filter(lambda x: x['name'].startswith(path), items)
     items = sorted(items, key=lambda x: x['name'])
     for subdir, items in itertools.groupby(items, key=lambda x: _get_subdir(x['name'], depth)):
         if not subdir:
@@ -146,8 +172,11 @@ def index(path):
     items = g.current_wiki.get_index()
     if path:
         path = to_canonical(path) + "/"
+        items = filter(lambda x: x['name'].startswith(path), items)
+    if not request.args.get('flat', '').lower() in ['yes', '1', 'true']:
+        items = _tree_index(items, path=path)
 
-    return render_template('wiki/index.html', index=_tree_index(items, path=path), path=path)
+    return render_template('wiki/index.html', index=items, path=path)
 
 
 @blueprint.route("/<path:name>", methods=['POST', 'PUT', 'DELETE'])
@@ -166,12 +195,11 @@ def page_write(name):
         if cname in current_app.config.get('WIKI_LOCKED_PAGES'):
             return dict(error=True, message="Page is locked"), 403
 
-        sha = g.current_wiki.write_page(cname,
-                                        request.form['content'],
-                                        message=request.form['message'],
-                                        create=True,
-                                        username=current_user.username,
-                                        email=current_user.email)
+        sha = g.current_wiki.get_page(cname).write(request.form['content'],
+                                                   message=request.form['message'],
+                                                   create=True,
+                                                   username=current_user.username,
+                                                   email=current_user.email)
 
     elif request.method == 'PUT':
         edit_cname = to_canonical(request.form['name'])
@@ -180,13 +208,12 @@ def page_write(name):
             return dict(error=True, message="Page is locked"), 403
 
         if edit_cname != cname:
-            g.current_wiki.rename_page(cname, edit_cname)
+            g.current_wiki.get_page(cname).rename(edit_cname)
 
-        sha = g.current_wiki.write_page(edit_cname,
-                                        request.form['content'],
-                                        message=request.form['message'],
-                                        username=current_user.username,
-                                        email=current_user.email)
+        sha = g.current_wiki.get_page(edit_cname).write(request.form['content'],
+                                                        message=request.form['message'],
+                                                        username=current_user.username,
+                                                        email=current_user.email)
 
         return dict(sha=sha)
 
@@ -195,9 +222,8 @@ def page_write(name):
         if cname in current_app.config.get('WIKI_LOCKED_PAGES'):
             return dict(error=True, message="Page is locked"), 403
 
-        sha = g.current_wiki.delete_page(cname,
-                                         username=current_user.username,
-                                         email=current_user.email)
+        sha = g.current_wiki.get_page(cname).delete(username=current_user.username,
+                                                    email=current_user.email)
 
     return dict(sha=sha)
 
@@ -218,6 +244,6 @@ def page(name):
     data = g.current_wiki.get_page(cname)
 
     if data:
-        return render_template('wiki/page.html', name=cname, page=data, partials=data.get('partials'))
+        return render_template('wiki/page.html', name=cname, page=data, partials=data.partials)
     else:
         return redirect(url_for('wiki.create', name=cname))
