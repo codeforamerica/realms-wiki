@@ -112,7 +112,7 @@ def cname_to_filename(cname):
     :return: str -- Filename
 
     """
-    return cname + ".md"
+    return cname
 
 
 def filename_to_cname(filename):
@@ -123,7 +123,7 @@ def filename_to_cname(filename):
     It's assumed filename is already canonical format
 
     """
-    return os.path.splitext(filename)[0]
+    return filename
 
 
 def gravatar_url(email):

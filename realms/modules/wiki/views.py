@@ -1,6 +1,7 @@
 import itertools
 import sys
-from flask import abort, g, render_template, request, redirect, Blueprint, flash, url_for, current_app
+from flask import abort, g, render_template, request, redirect
+from flask import send_from_directory, Blueprint, flash, url_for, current_app
 from flask.ext.login import login_required, current_user
 from realms.lib.util import to_canonical, remove_ext, gravatar_url
 from .models import PageNotFound
@@ -200,6 +201,10 @@ def page_write(name):
 
     return dict(sha=sha)
 
+@blueprint.route('/images/<path:filename>')
+def download_file(filename):
+    print filename
+    return send_from_directory(current_app.config['UPLOAD_FOLDER'], filename)
 
 @blueprint.route("/", defaults={'name': 'home'})
 @blueprint.route("/<path:name>")
@@ -210,7 +215,6 @@ def page(name):
     cname = to_canonical(name)
     if cname != name:
         return redirect(url_for('wiki.page', name=cname))
-
     data = g.current_wiki.get_page(cname)
 
     if data:
