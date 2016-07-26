@@ -1,3 +1,4 @@
+import os
 import itertools
 import sys
 from datetime import datetime
@@ -227,10 +228,9 @@ def page_write(name):
 
     return dict(sha=sha)
 
-@blueprint.route('/images/<path:filename>')
+@blueprint.route('/static/<path:filename>')
 def download_file(filename):
-    print filename
-    return send_from_directory(current_app.config['UPLOAD_FOLDER'], filename)
+    return send_from_directory(os.join(g.current_wiki.path, 'static'), filename)
 
 @blueprint.route("/", defaults={'name': 'home'})
 @blueprint.route("/<path:name>")
