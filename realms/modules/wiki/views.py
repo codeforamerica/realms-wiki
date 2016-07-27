@@ -228,11 +228,11 @@ def page_write(name):
 
     return dict(sha=sha)
 
-@blueprint.route('/static/<path:filename>')
+@blueprint.route('/images/<path:filename>')
 def download_file(filename):
-    return send_from_directory(os.join(g.current_wiki.path, 'static'), filename)
+    return send_from_directory(os.path.join(g.current_wiki.path, 'images'), filename)
 
-@blueprint.route("/", defaults={'name': 'home'})
+@blueprint.route("/", defaults={'name': 'home.md'})
 @blueprint.route("/<path:name>")
 def page(name):
     if current_app.config.get('PRIVATE_WIKI') and current_user.is_anonymous():
